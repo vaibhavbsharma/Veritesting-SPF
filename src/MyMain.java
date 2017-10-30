@@ -16,10 +16,7 @@
  * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
  * Boston, MA 02111-1307, USA.
  */
-import java.util.Map;
-import java.util.List;
-import java.util.Iterator;
-import java.util.HashSet;
+import java.util.*;
 
 import soot.Body;
 import soot.Local;
@@ -133,11 +130,11 @@ public class MyMain {
 
             final StringBuilder sB = new StringBuilder();
             final StringBuilder setSlotAttr_SB = new StringBuilder();
-            final StringBuilder lhs_SB = new StringBuilder();
+            final ArrayList<String> lhs_SB = new ArrayList();
             commonSucc.apply(new AbstractStmtSwitch() {
                 public void caseAssignStmt(AssignStmt stmt) {
                     String lhs = stmt.getLeftOp().toString();
-                    lhs_SB.append(lhs);
+                    lhs_SB.add(lhs);
                     String s_tmp = new String("sf.setSlotAttr("+
                             lvt.getLocalVarSlot(lhs.substring(0,lhs.length()-2))+
                             ", " + lhs + ");");
@@ -157,11 +154,40 @@ public class MyMain {
                                     phiExpr1_s
                             )));
                 }});
-            String startingInsn = ((Stmt)currUnit).getTag("BytecodeOffsetTag").toString();
+            String startingInsn = currUnit.getTag("BytecodeOffsetTag").toString();
             String endingInsn;
+            Unit savedCommonSucc = commonSucc;
             while(true) {
-                Tag t = ((Stmt)commonSucc).getTag("BytecodeOffsetTag");
+                Tag t = commonSucc.getTag("BytecodeOffsetTag");
                 if(t == null) {
+                    if(commonSucc != savedCommonSucc) {
+                        commonSucc.apply(new AbstractStmtSwitch() {
+                            public void caseAssignStmt(AssignStmt stmt) {
+                                String lhs = stmt.getLeftOp().toString();
+                                lhs_SB.add(lhs);
+                                String s_tmp = new String("\nsf.setSlotAttr("+
+                                        lvt.getLocalVarSlot(lhs.substring(0,lhs.length()-2))+
+                                        ", " + lhs + ");");
+                                setSlotAttr_SB.append(s_tmp);
+                                MyShimpleValueSwitch msvs = new MyShimpleValueSwitch(lvt);
+                                stmt.getRightOp().apply(msvs);
+                                String phiExpr0 = msvs.getArg0PhiExpr();
+                                String phiExpr1 = msvs.getArg1PhiExpr();
+
+                                String phiExpr0_s = MyUtils.nCNLIE + lhs + ", EQ, " + phiExpr0 + ")";
+                                String phiExpr1_s = MyUtils.nCNLIE + lhs + ", EQ, " + phiExpr1 + ")";
+                                // (pathLabel == 1 && lhs == phiExpr0) || (pathLabel ==2 && lhs == phiExpr1)
+                                String tmpStr = MyUtils.SPFLogicalAnd(sB.toString(),
+                                        MyUtils.SPFLogicalOr(
+                                                MyUtils.SPFLogicalAnd( thenPLAssignSPF,
+                                                        phiExpr0_s),
+                                                MyUtils.SPFLogicalAnd( elsePLAssignSPF,
+                                                        phiExpr1_s
+                                                )));
+                                sB.setLength(0);
+                                sB.append(tmpStr);
+                            }});
+                    }
                     commonSucc = g.getUnexceptionalSuccsOf(commonSucc).get(0);
                 } else {
                     endingInsn = t.toString();
@@ -198,15 +224,20 @@ public class MyMain {
                 String s = (String) it.next();
                 fn += "    SymbolicInteger " + s + " = makeSymbolicInteger(ti.getEnv(), \"" + s + "\");\n";
             }
-            fn += "    SymbolicInteger " + lhs_SB.toString() + " = makeSymbolicInteger(ti.getEnv(), \"" + lhs_SB.toString() + "\");\n";
+            for(int lhs_SB_i = 0; lhs_SB_i < lhs_SB.size(); lhs_SB_i++) {
+                String tmpStr = lhs_SB.get(lhs_SB_i);
+                fn += "    SymbolicInteger " + tmpStr + " = makeSymbolicInteger(ti.getEnv(), \"" + tmpStr + "\");\n";
+            }
             fn += "    SymbolicInteger pathLabel" + pathLabelVarNum + " = makeSymbolicInteger(ti.getEnv(), \"pathLabel" + pathLabelVarNum+ "\");\n";
             fn += "    PathCondition pc;\n";
             fn += "    pc = ((PCChoiceGenerator) ti.getVM().getSystemState().getChoiceGenerator()).getCurrentPC();\n";
             fn += "    pc._addDet(new ComplexNonLinearIntegerConstraint(\n    " + finalPathExpr + "));\n";
             fn += "    " + setSlotAttr_SB.toString() + "\n";
             fn += "    Instruction insn=instructionToExecute;\n";
-            fn += "    while(insn.getPosition() < " + endingInsn + ")\n";
-            fn += "      insn = insn.getNext();\n";
+            fn += "    while(insn.getPosition() != " + endingInsn + ") {\n";
+            fn += "      if(insn instanceof GOTO)  insn = ((GOTO) insn).getTarget();\n";
+            fn += "      else insn = insn.getNext();\n";
+            fn += "    }";
             if(!endingInsnsHash.contains(startingInsn))
                 fn += "    sf.pop(); sf.pop();\n"; // popping the region's starting node (if stmt) operands
             fn += "    ((PCChoiceGenerator) ti.getVM().getSystemState().getChoiceGenerator()).setCurrentPC(pc);\n";
@@ -250,8 +281,8 @@ public class MyMain {
                     currUnit.apply(myStmtSwitch);
                     String if_SPFExpr = myStmtSwitch.getSPFExpr();
                     String ifNot_SPFExpr = myStmtSwitch.getIfNotSPFExpr();
-                    Unit thenUnit = succs.get(1); //assuming this order for now
-                    Unit elseUnit = succs.get(0);
+                    Unit thenUnit = succs.get(0); //assuming this order for now
+                    Unit elseUnit = succs.get(1);
                     Unit nextUnit = null;
                     if(thenUnit == commonSucc) nextUnit = elseUnit;
                     if(elseUnit == commonSucc) nextUnit = thenUnit;
@@ -301,11 +332,11 @@ public class MyMain {
                             canVeritest = false;
                             break;
                         }
-                        String thenExpr1 = myStmtSwitch.getSPFExpr();
-                        if(thenExpr1 != null && !thenExpr1.equals("")) {
-                            if (!thenExpr.equals(""))
-                                thenExpr = MyUtils.SPFLogicalAnd(thenExpr, thenExpr1);
-                            else thenExpr = thenExpr1;
+                        String elseExpr1 = myStmtSwitch.getSPFExpr();
+                        if(elseExpr1 != null && !elseExpr1.equals("")) {
+                            if (!elseExpr.equals(""))
+                                elseExpr = MyUtils.SPFLogicalAnd(elseExpr, elseExpr1);
+                            else elseExpr = elseExpr1;
                         }
                         elseUnit = g.getUnexceptionalSuccsOf(elseUnit).get(0);
                         if(elseUnit == endingUnit) break;

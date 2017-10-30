@@ -18,17 +18,17 @@ import soot.Value;
 class MyUtils {
 	public static final int maxSuccSteps = 10;
 
-	public static final String nCNLIE = "new ComplexNonLinearIntegerExpression(";
+	public static final String nCNLIE = "\nnew ComplexNonLinearIntegerExpression(";
 	public static int pathCounter=0;
 
 	public static final int getPathCounter() { pathCounter++; return pathCounter; }
 
 	public static final String SPFLogicalAnd(String e1, String e2) {
-		return nCNLIE + e1 + ", LOGICAL_AND, " + e2 + ")";
+		return nCNLIE + e1 + ",\nLOGICAL_AND," + e2 + ")";
 	}
 
 	public static final String SPFLogicalOr(String e1, String e2) {
-		return nCNLIE + e1 + ", LOGICAL_OR, " + e2 + ")";
+		return nCNLIE + e1 + ",\nLOGICAL_OR," + e2 + ")";
 	}
 	
 	public static final Boolean isIntegerConstant(Value v) {
